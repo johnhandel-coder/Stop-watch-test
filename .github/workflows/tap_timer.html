@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Tap Timer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  background: #000;
+  color: #fff;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+#tap-zone {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#time {
+  font-size: clamp(56px, 18vw, 80px);
+  font-weight: 200;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s;
+}
+
+#ms {
+  font-size: clamp(28px, 9vw, 40px);
+  font-weight: 200;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+
+#status {
+  font-size: 16px;
+  color: #555;
+  margin-top: 20px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+#hint {
+  font-size: 15px;
+  color: #444;
+  margin-top: 8px;
+  letter-spacing: 0.3px;
+}
+
+.pulse {
+  animation: pulse 0.1s ease-out;
+}
+
+@keyframes pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+.ripple {
+  position: fixed;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  transform: scale(0);
+  animation: ripple-anim 0.5s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes ripple-anim {
+  to { transform: scale(6); opacity: 0; }
+}
+
+#lap-list {
+  position: fixed;
+  bottom: 40px;
+  width: 100%;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+  padding: 0 20px;
+}
+
+.lap {
+  font-size: 14px;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+.lap span { color: #888; }
+  </style>
+</head>
+<body>
+
+<div id="tap-zone">
+  <div id="time">00:00</div>
+  <div id="ms">.000</div>
+  <div id="status">Tap to start</div>
+  <div id="hint"></div>
+</div>
+
+<div id="lap-list"></div>
+
+<script>
+  const timeEl   = document.getElementById('time');
+  const msEl     = document.getElementById('ms');
+  const statusEl = document.getElementById('status');
+  const hintEl   = document.getElementById('hint');
+  const lapList  = document.getElementById('lap-list');
+  const tapZone  = document.getElementById('tap-zone');
+
+  let state      = 'idle';
+  let startTime  = 0;
+  let elapsed    = 0;
+  let rafId      = null;
+  let lapCount   = 0;
+  let lastLapTime = 0;
+
+  function fmt(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const m  = Math.floor(totalSec / 60).toString().padStart(2, '0');
+    const s  = (totalSec % 60).toString().padStart(2, '0');
+    const cs = Math.floor(ms % 1000).toString().padStart(3, '0');
+    return { main: `${m}:${s}`, ms: `.${cs}` };
+  }
+
+  function tick() {
+    const now = performance.now();
+    elapsed = now - startTime;
+    const { main, ms } = fmt(elapsed);
+    timeEl.textContent = main;
+    msEl.textContent   = ms;
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function spawnRipple(x, y) {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    const size = 80;
+    r.style.cssText = `width:${size}px;height:${size}px;left:${x - size/2}px;top:${y - size/2}px`;
+    document.body.appendChild(r);
+    r.addEventListener('animationend', () => r.remove());
+  }
+
+  function addLap() {
+    lapCount++;
+    const split = elapsed - lastLapTime;
+    lastLapTime = elapsed;
+    const { main, ms } = fmt(split);
+    const div = document.createElement('div');
+    div.className = 'lap';
+    div.innerHTML = `<span>Lap ${lapCount}</span>  ${main}${ms}`;
+    lapList.prepend(div);
+  }
+
+  tapZone.addEventListener('touchstart', handleTap, { passive: true });
+  tapZone.addEventListener('click', handleTap);
+
+  let lastTap = 0;
+  function handleTap(e) {
+    const now = Date.now();
+    if (now - lastTap < 300) return;
+    lastTap = now;
+
+    const touch = e.touches ? e.touches[0] : e;
+    spawnRipple(touch.clientX, touch.clientY);
+    timeEl.classList.remove('pulse');
+    void timeEl.offsetWidth;
+    timeEl.classList.add('pulse');
+
+    if (state === 'idle') {
+      startTime = performance.now();
+      elapsed = 0;
+      lastLapTime = 0;
+      lapCount = 0;
+      lapList.innerHTML = '';
+      rafId = requestAnimationFrame(tick);
+      state = 'running';
+      statusEl.textContent = 'Running — tap to lap';
+      hintEl.textContent   = 'Hold to stop';
+
+    } else if (state === 'running') {
+      addLap();
+
+    } else if (state === 'paused') {
+      elapsed = 0;
+      const { main, ms } = fmt(0);
+      timeEl.textContent = main;
+      msEl.textContent   = ms;
+      lapList.innerHTML  = '';
+      lapCount = 0;
+      state = 'idle';
+      statusEl.textContent = 'Tap to start';
+      hintEl.textContent   = '';
+    }
+  }
+
+  let pressTimer = null;
+  tapZone.addEventListener('touchstart', () => {
+    pressTimer = setTimeout(() => {
+      if (state === 'running') {
+        cancelAnimationFrame(rafId);
+        state = 'paused';
+        statusEl.textContent = 'Stopped — tap to reset';
+        hintEl.textContent   = '';
+      }
+    }, 600);
+  }, { passive: true });
+
+  tapZone.addEventListener('touchend',   () => clearTimeout(pressTimer));
+  tapZone.addEventListener('touchmove',  () => clearTimeout(pressTimer));
+</script>
+
+</body>
+</html>
